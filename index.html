@@ -1,0 +1,532 @@
+﻿<html>
+	<head>
+		<style>
+			html, body {
+				width: 100%;
+				height: 100%;
+			}
+			body {
+				margin: 0px; 
+				padding: 0px;
+				overflow: hidden;
+			}
+			canvas {
+				touch-action: none;
+			}
+			.overlay-button {
+				position: absolute;
+				width: 8vh;
+				height: 8vh;
+				font-size: 5vh;
+				margin: 1.5vh;
+				color: white;
+				background-color: transparent;
+				border-radius: 50%;
+				border: none;
+			}
+			#scramble-button {
+				right: 0px;
+				top: 0px;
+			}
+			#fullscreen-button {
+				right: 0px;
+				bottom: 0px;
+			}
+		</style>
+	</head>
+	<body>
+		<canvas></canvas>
+		<button id="scramble-button" class="overlay-button">🔀</button>
+		<button id="fullscreen-button" class="overlay-button">&#x26F6;</button>
+
+		<!-- vector2, matrix -->
+		<script>
+			var Vec2 = {
+				add: (a, b) => [a[0] + b[0], a[1] + b[1]],
+				subtract: (a, b) => [a[0] - b[0], a[1] - b[1]],
+				multiply: (v, s) => [v[0] * s, v[1] * s],
+				divide: (v, d) => [v[0] / d, v[1] / d],
+				magnitude: (v) => Math.sqrt(v[0]**2 + v[1]**2),
+				dot: (a, b) => a[0] * b[0] + a[1] * b[1],
+				normalize: (v) => Vec2.divide(v, Vec2.magnitude(v)),
+				orthogonal: (v) => [-v[1], v[0]],
+				distance: (a, b) => Vec2.magnitude(Vec2.subtract(b, a))
+			};
+			var Mat2x2 = {
+				orthoNormalInverse: (m) => [m[0], -m[1], -m[2], m[3]],
+				multiplyVector: (m, v) => [
+					m[0] * v[0] + m[2] * v[1],
+					m[1] * v[0] + m[3] * v[1]
+				],
+				rotation: (angle) => {
+					const [s, c] = [Math.sin(angle), Math.cos(angle)];
+					return [c, s, -s, c]
+				}
+			}
+		</script>
+
+		<!-- setup canvas -->
+		<script>
+			const canvas = document.querySelector("canvas");
+			let canvasScale = 200;
+			const fitCanvasToWindow = () => {
+				const targetWidth = window.innerWidth;
+				const targetHeight = window.innerHeight;
+				const pixelScale = window.devicePixelRatio;
+				Object.assign(canvas, {
+					width: targetWidth * pixelScale,
+					height: targetHeight * pixelScale
+				});
+				Object.assign(canvas.style, {
+					width: `${targetWidth}px`,
+					height: `${targetHeight}px`
+				});
+				ctx.setTransform(pixelScale, 0, 0, pixelScale, 0, 0);
+				canvasScale = window.innerWidth * 0.14;
+			};
+			window.onresize = () => {
+				fitCanvasToWindow();
+				prepareAndRender();
+			};
+			const ctx = canvas.getContext("2d");
+			fitCanvasToWindow();
+		</script>
+
+		<!-- util -->
+		<script>
+			function startLoop(callback) {
+				let prevTime = Date.now();
+				const loop = () => {
+					const curTime = Date.now();
+					const dt = (curTime - prevTime) / 1000;
+					prevTime = curTime;
+					requestAnimationFrame(loop);
+					callback(dt);
+				};
+				loop();
+			}
+			function createArray(length){
+				const array = [];
+				for (let i = 0; i < length; i++){
+					array[i] = i;
+				}
+				return array;
+			}
+			function drawDisc(point, radius){
+				ctx.beginPath();
+				ctx.arc(point[0], point[1], radius, 0, Math.PI * 2);
+				ctx.fill();
+			}
+			function drawPolyline(points) {
+				ctx.beginPath();
+				ctx.moveTo(...points[0]);
+				for (let i = 1; i < points.length; i++){
+					ctx.lineTo(...points[i]);
+				}
+				ctx.stroke();
+			}
+			function randomMin1ToPlus1() {
+				return Math.random() * 2 - 1;
+			}
+		</script>
+
+		<!-- shapes -->
+		<script>
+			function pathDisc(ctx) {
+				ctx.beginPath();
+				ctx.arc(0, 0, 1, 0, Math.PI * 2);
+			}
+			function pathSquare(ctx) {
+				ctx.scale(1.5, 1.5);
+				ctx.translate(-0.5, -0.5);
+				ctx.beginPath();
+				ctx.rect(0, 0, 1, 1);
+			}
+			function pathTriangle(ctx) {
+				ctx.scale(1.2, 1.2);
+				const sqrt3 = 3 ** 0.5;
+				const x = sqrt3 / 2;
+				ctx.beginPath();
+				ctx.moveTo(0, 1);
+				ctx.translate(0, -0.5);
+				ctx.lineTo(x, 0);
+				ctx.lineTo(-x, 0);
+				ctx.closePath();
+			}
+			function pathDiamond(ctx) {
+				const width = 0.9;
+				const height = 1.1;
+				ctx.beginPath();
+				ctx.moveTo(0, height);
+				ctx.lineTo(width, 0);
+				ctx.lineTo(0, -height);
+				ctx.lineTo(-width, 0);
+				ctx.closePath();
+			}
+			function pathPentagon(ctx) {
+				ctx.beginPath();
+				ctx.moveTo(0, 1);
+				const angleDelta = 2 * Math.PI / 5;
+				for (let i = 1; i < 5; i++) {
+					ctx.rotate(angleDelta);
+					ctx.lineTo(0, 1);
+				}
+				ctx.closePath();
+			}
+			function pathCross(ctx) {
+				const size = 1.1;
+				const halfWidth = 0.22;
+				ctx.rotate(Math.PI / 4);
+				ctx.beginPath();
+				ctx.moveTo(-halfWidth, size);
+				for (let i = 0; i < 4; i++) {
+					ctx.lineTo(-halfWidth, size);
+					ctx.lineTo(halfWidth, size);
+					ctx.lineTo(halfWidth, halfWidth);
+					ctx.rotate(-Math.PI * 0.5);
+				}
+				ctx.closePath();
+			}
+			function pathStar(ctx) {
+				const innerRadius = 0.5;
+				const outerRadius = 1.1;
+				const angleDelta = Math.PI / 5;
+				ctx.beginPath();
+				ctx.moveTo(0, outerRadius);
+				for (let i = 0; i < 5; i++) {
+					ctx.lineTo(0, outerRadius);
+					ctx.rotate(angleDelta);
+					ctx.lineTo(0, innerRadius);
+					ctx.rotate(angleDelta);
+				}
+				ctx.closePath();
+			}
+
+			const shapeRenderMap = {
+				"disc": pathDisc,
+				"square": pathSquare,
+				"triangle": pathTriangle,
+				"diamond": pathDiamond,
+				"pentagon": pathPentagon,
+				"cross": pathCross,
+				"star": pathStar
+			};
+
+			function pathShapeByName(shapeName, ctx) {
+				const pathFunc = shapeRenderMap[shapeName];
+				if (!pathFunc) return;
+				ctx.save();
+				const shapeScale = 0.2;
+				ctx.scale(shapeScale, shapeScale);
+				pathFunc(ctx);
+				ctx.restore();
+			}
+			function drawShapeOutline(shapeName, ctx) {
+				ctx.save();
+				pathShapeByName(shapeName, ctx);
+				ctx.strokeStyle = "white";
+				ctx.lineWidth = 0.01;
+				ctx.stroke();
+				ctx.restore();
+			}
+			function drawFilledShape(shapeName, ctx) {
+				ctx.save();
+				pathShapeByName(shapeName, ctx);
+				ctx.shadowColor = "#f5f5f552";
+				ctx.shadowBlur = 20;
+				ctx.fill();
+				ctx.restore();
+			}
+		</script>
+
+		<!-- app -->
+		<script>
+
+			function getCanvasSize(){
+				return [
+					canvas.clientWidth, 
+					canvas.clientHeight
+				]
+			}
+			function getCtxTransform(){
+				const [w, h] = getCanvasSize();
+				return [
+					canvasScale, 0, 0, -canvasScale,
+					w * 0.5, h * 0.5
+				]
+			}
+			function prepareAndRender() {
+				const [w, h] = getCanvasSize();
+
+				ctx.clearRect(0, 0, w, h);
+				ctx.save();
+				ctx.fillStyle = "#1c1211";
+				ctx.fillRect(0, 0, w, h);
+				const ctxTransform = getCtxTransform();
+				ctx.transform(...ctxTransform);
+
+				render();
+
+				ctx.restore();
+			}
+
+
+
+			const loopRadius = 1;
+			let loopObjects = [
+				{
+					shape: "disc",
+					position: [0, 0]
+				},
+				{
+					shape: "square",
+					position: [loopRadius, loopRadius]
+				},
+				{
+					shape: "triangle",
+					position: [2 * loopRadius, 0]
+				},
+				{
+					shape: "diamond",
+					position: [loopRadius, -loopRadius]
+				},
+				{
+					shape: "star",
+					position: [-loopRadius, loopRadius]
+				},
+				{
+					shape: "pentagon",
+					position: [-2 * loopRadius, 0]
+				},
+				{
+					shape: "cross",
+					position: [-loopRadius, -loopRadius]
+				},
+			];
+
+			function renderLoopObject(ctx, loopObj){
+				ctx.save();
+				const pos = loopObj.position;
+				ctx.translate(pos[0], pos[1]);
+				const isAtInitialPosition = Vec2.distance(loopObj.initialPosition, loopObj.position) < 0.1;
+				ctx.fillStyle = isAtInitialPosition ? "#418252" : "#9c4640";
+				drawFilledShape(loopObj.shape, ctx);
+				ctx.restore();
+			}
+			function renderShapeOutline(ctx, loopObj){
+				ctx.save();
+				const pos = loopObj.initialPosition;
+				ctx.translate(pos[0], pos[1]);
+				drawShapeOutline(loopObj.shape, ctx);
+				ctx.restore();
+			}
+			function renderLoopObjects(ctx, loopObjects){
+				for (const loopObj of loopObjects){
+					renderLoopObject(ctx, loopObj);
+				}
+				for (const loopObj of loopObjects) {
+					renderShapeOutline(ctx, loopObj);
+				}
+			}
+			
+			function snapPosition(position){
+				return position.map(Math.round);
+			}
+			function snapLoopObjectPosition(loopObject) {
+				return {
+					...loopObject,
+					position: snapPosition(loopObject.position)
+				}
+			}
+			function snapLoopObjectPositions(loopObjects){
+				return loopObjects.map(snapLoopObjectPosition);
+			}
+			function rotateLoopObject(center, matrix, loopObj){
+				return {
+					...loopObj,
+					position: Vec2.add(
+						center, 
+						Mat2x2.multiplyVector(
+							matrix, 
+							Vec2.subtract(loopObj.position, center)
+						) 
+					) 
+				}
+			}
+			function rotateLoopObjects(center, angleDelta, loopObjects) {
+				const matrix = Mat2x2.rotation(angleDelta);
+				return loopObjects.map(
+					loopObj => {
+						if (!loopObj.rotated) return loopObj;
+						return rotateLoopObject(center, matrix, loopObj)
+					}
+				)
+			}
+			function isLoopObjectCloseTo(center, maxDistance, loopObj){
+				return Vec2.distance(loopObj.position, center) <= maxDistance;
+			}
+			function isOnLeftLoop(obj){
+				return isLoopObjectCloseTo([-loopRadius, 0], loopRadius + 0.1, obj);
+			}
+			function isOnRightLoop(obj){
+				return isLoopObjectCloseTo([loopRadius, 0], loopRadius + 0.1, obj);
+			}
+			function markLoopObjectsRotated(predicate, loopObjects){
+				return loopObjects.map(
+					obj => ({
+						...obj, rotated: predicate(obj)
+					})
+				)
+			}
+			function markLoopObjectsRotatedBySign(sign, loopObjects){
+				return markLoopObjectsRotated(sign > 0 ? isOnRightLoop : isOnLeftLoop, loopObjects)
+			}
+			function recordInitialPosition(loopObjects){
+				return loopObjects.map(
+					loopObj => ({
+						...loopObj, 
+						initialPosition: loopObj.position
+					})
+				)
+			}
+			function performLoopRotations(rotations, loopObjects){
+				for (const rotation of rotations){
+					const side = rotation.side;
+					const center = [side * loopRadius, 0];
+					const angle = rotation.amount * Math.PI / 2;
+					loopObjects = markLoopObjectsRotated(side < 0 ? isOnLeftLoop : isOnRightLoop, loopObjects);
+					loopObjects = rotateLoopObjects(center, angle, loopObjects);
+				}
+				return loopObjects;
+			}				
+			function generateRandomLoopRotations(count){
+				const rotations = [];
+				for (let i = 0; i < count; i++){
+					const side = i % 2 === 0 ? 1 : -1;
+					const amount = Math.ceil(Math.random() * 3);
+					rotations.push({
+						side, amount
+					});
+				}
+				return rotations;
+			}
+
+			function render() {
+				renderLoopObjects(ctx, loopObjects);
+			};
+			
+
+			let targetAngle = 0;
+			let currentAngle = 0;
+			let rotationRunning = false;
+			let rotationCenter = [loopRadius, 0];
+
+			function update(dt){
+				const remainingAngles = targetAngle - currentAngle;
+				const angleDelta = remainingAngles * dt * 5;
+				if (Math.abs(angleDelta) < 1e-4){
+					if (rotationRunning){
+						rotationRunning = false;
+						// loopObjects = snapLoopObjectPositions(loopObjects);
+						prepareAndRender();
+					}
+				}
+				else {
+					rotationRunning = true;
+				}
+				if (!rotationRunning) return;
+
+				currentAngle += angleDelta;
+				loopObjects = rotateLoopObjects(
+					rotationCenter, angleDelta, loopObjects
+				);
+				prepareAndRender();
+			}
+
+			loopObjects = recordInitialPosition(loopObjects);
+			prepareAndRender();
+			startLoop(update);
+
+			function finishCurrentRotation(){
+				loopObjects = rotateLoopObjects(
+					rotationCenter, targetAngle - currentAngle, loopObjects
+				);
+				loopObjects = snapLoopObjectPositions(loopObjects);
+				currentAngle = 0;
+				targetAngle = 0;
+			}
+
+			function rotateLoop(direction, rightSide){
+				finishCurrentRotation();
+				loopObjects = markLoopObjectsRotated(rightSide ? isOnRightLoop : isOnLeftLoop, loopObjects);
+				targetAngle = direction * Math.PI / 2;
+				rotationCenter = [(rightSide ? +1 : -1) * loopRadius, 0];
+			}
+
+			document.addEventListener("keypress", e => {
+				if (e.key === "a"){
+					rotateLoop(+1, false);
+				}
+				else if (e.key === "d") {
+					rotateLoop(-1, false);
+				}
+				if (e.key === "j") {
+					rotateLoop(+1, true);
+				}
+				else if (e.key === "l") {
+					rotateLoop(-1, true);
+				}
+			});
+
+			function scramble(){
+				finishCurrentRotation();
+				const scrambleRotations = generateRandomLoopRotations(30);
+				loopObjects = performLoopRotations(scrambleRotations, loopObjects);
+				prepareAndRender();
+			}
+			document.querySelector("#scramble-button").addEventListener("click", scramble);
+
+			//pointer-interaction
+			let isDragging = false;
+			let draggedSide = 0;
+			function screenToScenePoint(ev){
+				const screenPoint = [ev.clientX, ev.clientY];
+				const canvasSize = getCanvasSize();
+				return Vec2.divide(
+					Vec2.subtract(
+						screenPoint,
+						Vec2.divide(canvasSize, 2)
+					),
+					canvasScale
+				);
+			}
+			document.addEventListener("pointerdown", e => {
+				const scenePoint = screenToScenePoint(e);
+				if (Math.abs(scenePoint[0]) < 2 * loopRadius) return;
+				finishCurrentRotation();
+				isDragging = true;
+				draggedSide = Math.sign(scenePoint[0]);
+				rotationCenter = [draggedSide * loopRadius, 0];
+				loopObjects = markLoopObjectsRotatedBySign(draggedSide, loopObjects);
+			});
+			document.addEventListener("pointerup", e => {
+				isDragging = false;
+				targetAngle = Math.PI / 2 * Math.round(targetAngle / (Math.PI / 2));
+			});
+			document.addEventListener("pointermove", e => {
+				if (!isDragging) return;
+				targetAngle -= draggedSide * e.movementY * 0.01;
+			});
+
+			const fullscreenButton = document.querySelector("#fullscreen-button");
+			document.addEventListener("fullscreenchange", () => {
+				const isFullScreen = document.fullscreenElement !== null;
+				fullscreenButton.style.display = isFullScreen ? "none" : "initial";
+			});
+			fullscreenButton.addEventListener("click", () => {
+				document.documentElement.requestFullscreen();
+			});
+
+		</script>	
+	</body>
+</html>
